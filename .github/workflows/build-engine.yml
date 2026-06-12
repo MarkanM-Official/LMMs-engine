@@ -37,6 +37,7 @@ jobs:
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
           pip install pyinstaller cython
           pip install --prefer-binary -r requirements.txt
 
