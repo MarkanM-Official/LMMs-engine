@@ -8,8 +8,7 @@ from typing import List, Optional, Dict, Any
 import uvicorn
 from huggingface_hub import hf_hub_download
 
-from lmms.backend.manager import backend_manager
-from lmms.storage.coordination import list_models as get_coordination_models_db, read_status, write_status
+from lmms.engine.manager import engine_manager
 
 app = FastAPI(title="LMMs Engine API")
 
@@ -37,11 +36,7 @@ class ChatRequest(BaseModel):
 class DoctorRequest(BaseModel):
     fix: bool = False
 
-class CoordinationUpdateRequest(BaseModel):
-    model_name: str
-    status: str
-    last_action: str
-    output_summary: str
+
 
 @app.post("/v1/models/load")
 async def load_model(req: LoadRequest):
@@ -51,25 +46,25 @@ async def load_model(req: LoadRequest):
         
     size_gb = os.path.getsize(path) / (1024**3)
     
-    if not backend_manager.cache.can_fit(size_gb):
+    if not engine_manager.cache.can_fit(size_gb):
         raise HTTPException(status_code=507, detail="Insufficient VRAM/RAM to load model")
         
     # Register in cache
-    backend_manager.cache.load_model(req.model_name, size_gb)
+    engine_manager.cache.load_model(req.model_name, size_gb)
     
     # Actually load into runtime (llama_cpp)
-    success = backend_manager.runtime.load_model(path)
+    success = engine_manager.runtime.load_model(path)
     if not success:
-        backend_manager.cache.unload_model(req.model_name)
+        engine_manager.cache.unload_model(req.model_name)
         raise HTTPException(status_code=500, detail="Failed to initialize runtime")
         
-    return {"status": "success", "stats": backend_manager.cache.get_stats()}
+    return {"status": "success", "stats": engine_manager.cache.get_stats()}
 
 @app.post("/v1/models/unload")
 async def unload_model(req: UnloadRequest):
-    backend_manager.cache.unload_model(req.model_name)
-    backend_manager.runtime.unload_model()
-    return {"status": "success", "stats": backend_manager.cache.get_stats()}
+    engine_manager.cache.unload_model(req.model_name)
+    engine_manager.runtime.unload_model()
+    return {"status": "success", "stats": engine_manager.cache.get_stats()}
 
 @app.get("/v1/models/list")
 async def list_models():
@@ -86,7 +81,7 @@ async def list_models():
 
 @app.get("/v1/models/ps")
 async def ps_models():
-    return backend_manager.cache.get_stats()
+    return engine_manager.cache.get_stats()
 
 @app.get("/v1/models/info/{model_name}")
 async def info_model(model_name: str):
@@ -127,9 +122,9 @@ async def run_benchmark():
 @app.delete("/v1/models/delete/{model_name}")
 async def delete_model(model_name: str):
     path = os.path.join(MODELS_DIR, f"{model_name}.gguf")
-    if backend_manager.runtime._is_loaded:
-        backend_manager.cache.unload_model(model_name)
-        backend_manager.runtime.unload_model()
+    if engine_manager.runtime._is_loaded:
+        engine_manager.cache.unload_model(model_name)
+        engine_manager.runtime.unload_model()
     if os.path.exists(path):
         os.remove(path)
         return {"status": "success", "message": f"Deleted {model_name}"}
@@ -199,7 +194,7 @@ async def engine_doctor(req: DoctorRequest):
         if not report["cuda_support"]:
             fixes_applied.append("SUGGESTION: Run `CMAKE_ARGS='-DGGML_CUDA=on' pip install llama-cpp-python --upgrade --force-reinstall --no-cache-dir`")
             
-        backend_manager.runtime.unload_model()
+        engine_manager.runtime.unload_model()
         fixes_applied.append("Cleared VRAM cache and unloaded models.")
         
     return {"report": report, "fixes": fixes_applied}
@@ -231,9 +226,35 @@ def download_model_task(model_name: str):
                 break
                 
         print(f"Starting download for {repo_id}/{target_file}...")
+        
+        # Track active download
+        downloads_file = os.path.expanduser("~/.lmms/logs/downloads.json")
+        os.makedirs(os.path.dirname(downloads_file), exist_ok=True)
+        state = {}
+        if os.path.exists(downloads_file):
+            try:
+                with open(downloads_file, "r") as f:
+                    state = json.load(f)
+            except Exception: pass
+            
+        state[model_name] = {"status": "downloading", "repo": repo_id, "file": target_file}
+        with open(downloads_file, "w") as f:
+            json.dump(state, f)
+            
         hf_hub_download(repo_id=repo_id, filename=target_file, local_dir=MODELS_DIR)
+        
+        state[model_name] = {"status": "complete", "repo": repo_id, "file": target_file}
+        with open(downloads_file, "w") as f:
+            json.dump(state, f)
+            
         print("Download complete.")
     except Exception as e:
+        downloads_file = os.path.expanduser("~/.lmms/logs/downloads.json")
+        try:
+            with open(downloads_file, "r") as f: state = json.load(f)
+            state[model_name] = {"status": "failed", "error": str(e)}
+            with open(downloads_file, "w") as f: json.dump(state, f)
+        except Exception: pass
         print(f"Download failed: {e}")
 
 @app.post("/v1/models/pull")
@@ -245,14 +266,16 @@ async def pull_model(req: PullRequest, background_tasks: BackgroundTasks):
 async def chat_completions(req: ChatRequest):
     # Ensure a model is loaded. If not, auto-load? The prompt says "Ensure real tokens stream"
     # LlamaCppRuntime has generate(context, stream=True)
-    if not backend_manager.runtime._is_loaded:
+    if not engine_manager.runtime._is_loaded:
         # Try to auto-load if file exists
         path = os.path.join(MODELS_DIR, f"{req.model_name}.gguf")
         if os.path.exists(path):
             size_gb = os.path.getsize(path) / (1024**3)
-            if backend_manager.cache.can_fit(size_gb):
-                backend_manager.cache.load_model(req.model_name, size_gb)
-                backend_manager.runtime.load_model(path)
+            if engine_manager.cache.can_fit(size_gb):
+                success = engine_manager.runtime.load_model(path)
+                if not success:
+                    raise HTTPException(status_code=500, detail="Failed to load model. Is llama-cpp-python installed?")
+                engine_manager.cache.load_model(req.model_name, size_gb)
             else:
                 raise HTTPException(status_code=507, detail="Insufficient memory to auto-load")
         else:
@@ -262,7 +285,7 @@ async def chat_completions(req: ChatRequest):
         async def event_generator():
             try:
                 # generate yields {"message": {"content": "..."}}
-                generator = backend_manager.runtime.generate({"messages": req.messages, "mode": req.mode, "think": req.think}, stream=True)
+                generator = engine_manager.runtime.generate({"messages": req.messages, "mode": req.mode, "think": req.think}, stream=True)
                 for chunk in generator:
                     # chunk is dict, we yield SSE format
                     # data: {"content": "..."}
@@ -272,29 +295,10 @@ async def chat_completions(req: ChatRequest):
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
         return StreamingResponse(event_generator(), media_type="text/event-stream")
     else:
-        response = backend_manager.runtime.generate({"messages": req.messages, "mode": req.mode, "think": req.think}, stream=False)
+        response = engine_manager.runtime.generate({"messages": req.messages, "mode": req.mode, "think": req.think}, stream=False)
         return response
 
-# ==========================================
-# Phase C: Shared Coordination Store APIs
-# ==========================================
 
-@app.get("/v1/coordination/models")
-async def get_coordination_models():
-    models = get_coordination_models_db()
-    return {"models": models}
-
-@app.get("/v1/coordination/model/{name}")
-async def get_coordination_model(name: str):
-    status = read_status(name)
-    if not status:
-        raise HTTPException(status_code=404, detail="Model coordination state not found")
-    return status
-
-@app.post("/v1/coordination/update")
-async def update_coordination_model(req: CoordinationUpdateRequest):
-    write_status(req.model_name, req.status, req.last_action, req.output_summary)
-    return {"status": "success", "model_name": req.model_name}
 
 
 def run_server(port: int = 11435):

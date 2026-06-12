@@ -4,7 +4,8 @@ from lmms.engine.runtimes.base import RuntimeContract
 
 try:
     from llama_cpp import Llama
-except ImportError:
+except Exception as e:
+    print(f"Warning: Failed to import llama_cpp: {e}")
     Llama = None
 
 class LlamaCppRuntime(RuntimeContract):
@@ -97,8 +98,9 @@ class LlamaCppRuntime(RuntimeContract):
                 for chunk in response_generator:
                     if "choices" in chunk and len(chunk["choices"]) > 0:
                         delta = chunk["choices"][0].get("delta", {})
-                        if "content" in delta:
-                            yield {"message": {"content": delta["content"]}}
+                        token = delta.get("content")
+                        if token:
+                            yield {"message": {"role": "assistant", "content": token}}
             return stream_response()
         else:
             response = self._model.create_chat_completion(
