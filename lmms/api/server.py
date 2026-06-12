@@ -61,10 +61,110 @@ async def load_model(req: LoadRequest):
     return {"status": "success", "stats": engine_manager.cache.get_stats()}
 
 @app.post("/v1/models/unload")
-async def unload_model(req: UnloadRequest):
-    engine_manager.cache.unload_model(req.model_name)
+def unload_model(req: UnloadRequest):
     engine_manager.runtime.unload_model()
-    return {"status": "success", "stats": engine_manager.cache.get_stats()}
+    engine_manager.cache.unload_model(req.model_name)
+    engine_manager.air_scheduler.remove_model(req.model_name)
+    return {"status": "success", "message": f"Model {req.model_name} unloaded."}
+
+@app.get("/v1/air/ps")
+def air_ps():
+    return engine_manager.air_scheduler.get_ps()
+
+@app.get("/v1/air/stats")
+def air_stats():
+    from lmms.engine.air.stats import AirStats
+    return AirStats.get_system_stats()
+
+@app.get("/v1/air/cache")
+def air_cache():
+    import os
+    from lmms.engine.registry import RegistryManager
+    reg = RegistryManager()
+    
+    # Get all downloaded models
+    disk_models = []
+    if os.path.exists(reg.models_dir):
+        for f in os.listdir(reg.models_dir):
+            if f.endswith(".gguf"):
+                disk_models.append(f.replace(".gguf", ""))
+                
+    vram_models = [m["model"] for m in engine_manager.air_scheduler.get_ps() if m["vram_gb"] > 0]
+    ram_models = engine_manager.air_ram_cache.get_models()
+    
+    return {
+        "vram_models": vram_models,
+        "ram_models": ram_models,
+        "disk_models": [m for m in disk_models if m not in vram_models and m not in ram_models]
+    }
+
+@app.post("/v1/air/generate")
+def air_generate(req: ChatRequest):
+    model_name = req.model_name
+    
+    # We don't forcefully evict everything anymore.
+    # The Swapper will automatically handle eviction if VRAM is constrained.
+    
+    # We must resolve the path to load the model physically
+    import os, json
+    from lmms.engine.registry import RegistryManager
+    reg = RegistryManager()
+    path = os.path.join(reg.models_dir, f"{model_name}.gguf")
+    
+    if not os.path.exists(path):
+        # Try to resolve via downloads.json mapping
+        try:
+            downloads_file = os.path.expanduser("~/.lmms/logs/downloads.json")
+            if os.path.exists(downloads_file):
+                with open(downloads_file, "r") as f: d = json.load(f)
+                if model_name in d and d[model_name].get("file"):
+                    path = os.path.join(reg.models_dir, d[model_name]["file"])
+        except Exception: pass
+
+    if not os.path.exists(path):
+        # Fallback to fuzzy search
+        search_term = model_name.replace(":", "-").lower()
+        for f in os.listdir(reg.models_dir):
+            if f.endswith(".gguf") and search_term in f.lower():
+                path = os.path.join(reg.models_dir, f)
+                break
+
+    if not os.path.exists(path):
+        manifest_path = os.path.join(reg.manifests_dir, f"{model_name}.json")
+        if os.path.exists(manifest_path):
+            import json
+            with open(manifest_path, "r") as f:
+                data = json.load(f)
+                base = data.get("base_model", "")
+                path = os.path.join(reg.models_dir, f"{base}.gguf") if not base.endswith(".gguf") else os.path.join(reg.models_dir, base)
+                
+    if os.path.exists(path):
+        size_gb = os.path.getsize(path) / (1024**3)
+        # Ensure we have VRAM capacity before loading
+        if not engine_manager.air_swapper.ensure_vram_capacity(size_gb):
+            raise Exception("Insufficient VRAM to load this model, even after eviction.")
+            
+        # Physically load it
+        engine_manager.runtime.load_model(path)
+        
+        # Logically update the swapper
+        if model_name in engine_manager.air_scheduler.active_models:
+            if engine_manager.air_scheduler.active_models[model_name]["location"] != "VRAM":
+                engine_manager.air_swapper.swap_to_vram(model_name)
+        else:
+            engine_manager.air_scheduler.register_model(model_name, "VRAM", size_gb, 0.0)
+    engine_manager.air_scheduler.update_state(model_name, "Generating")
+    
+    def stream_air():
+        import json
+        try:
+            for chunk in engine_manager.runtime.generate({"messages": req.messages}, stream=True):
+                yield f"data: {json.dumps(chunk)}\n\n"
+            yield "data: [DONE]\n\n"
+        finally:
+            engine_manager.air_scheduler.update_state(model_name, "Keep Warm")
+            
+    return StreamingResponse(stream_air(), media_type="text/plain")
 
 @app.get("/v1/models/list")
 async def list_models():
@@ -203,13 +303,21 @@ def download_model_task(model_name: str):
     try:
         from huggingface_hub import HfApi
         api = HfApi()
-        repo_id = model_name
-        
-        if "/" not in model_name:
-            models = list(api.list_models(search=model_name, filter="gguf", limit=1))
+        if "/" in model_name:
+            repo_id = model_name
+        else:
+            # Map ollama tags to HF search
+            search_term = model_name.replace(":", "-")
+            models = list(api.list_models(search=search_term, filter="gguf", limit=1))
             if models:
                 repo_id = models[0].id
             else:
+                downloads_file = os.path.expanduser("~/.lmms/logs/downloads.json")
+                try:
+                    with open(downloads_file, "r") as f: state = json.load(f)
+                    state[model_name] = {"status": "failed (not found)", "repo": model_name, "file": ""}
+                    with open(downloads_file, "w") as f: json.dump(state, f)
+                except Exception: pass
                 print(f"Could not find any GGUF repo matching {model_name}")
                 return
                 
@@ -237,15 +345,46 @@ def download_model_task(model_name: str):
                     state = json.load(f)
             except Exception: pass
             
-        state[model_name] = {"status": "downloading", "repo": repo_id, "file": target_file}
+        state[model_name] = {"status": "0%", "repo": repo_id, "file": target_file}
         with open(downloads_file, "w") as f:
             json.dump(state, f)
             
-        hf_hub_download(repo_id=repo_id, filename=target_file, local_dir=MODELS_DIR)
+        # Force HF logging to INFO to ensure tqdm is not disabled
+        import logging
+        logging.getLogger("huggingface_hub").setLevel(logging.INFO)
+
+        from huggingface_hub.utils import _tqdm
+        original_tqdm = _tqdm.tqdm
+
+        class DownloadTqdm(original_tqdm):
+            def update(self, n=1):
+                super().update(n)
+                if hasattr(self, 'total') and self.total:
+                    pct = int((self.n / self.total) * 100)
+                    speed = getattr(self, 'format_dict', {}).get('rate', 0)
+                    speed_str = f"{speed / 1024 / 1024:.2f} MB/s" if speed else ""
+                    size_str = f"{self.n / 1024 / 1024 / 1024:.2f}G/{self.total / 1024 / 1024 / 1024:.2f}G"
+                    
+                    try:
+                        with open(downloads_file, "r") as file: d = json.load(file)
+                        d[model_name]["status"] = f"{pct}% ({size_str} @ {speed_str})"
+                        with open(downloads_file, "w") as file: json.dump(d, file)
+                    except Exception: pass
+
+        _tqdm.tqdm = DownloadTqdm
         
-        state[model_name] = {"status": "complete", "repo": repo_id, "file": target_file}
-        with open(downloads_file, "w") as f:
-            json.dump(state, f)
+        try:
+            hf_hub_download(repo_id=repo_id, filename=target_file, local_dir=MODELS_DIR)
+            
+            # Set state to complete
+            try:
+                with open(downloads_file, "r") as f: state = json.load(f)
+                state[model_name]["status"] = "complete"
+                with open(downloads_file, "w") as f: json.dump(state, f)
+            except Exception: pass
+            
+        finally:
+            _tqdm.tqdm = original_tqdm # Restore original just in case
             
         print("Download complete.")
     except Exception as e:
@@ -266,9 +405,26 @@ async def pull_model(req: PullRequest, background_tasks: BackgroundTasks):
 async def chat_completions(req: ChatRequest):
     # Ensure a model is loaded. If not, auto-load? The prompt says "Ensure real tokens stream"
     # LlamaCppRuntime has generate(context, stream=True)
-    if not engine_manager.runtime._is_loaded:
+    if req.model_name not in engine_manager.runtime._models and req.model_name + ".gguf" not in engine_manager.runtime._models and os.path.basename(req.model_name).replace(".gguf", "") not in engine_manager.runtime._models:
         # Try to auto-load if file exists
         path = os.path.join(MODELS_DIR, f"{req.model_name}.gguf")
+        
+        if not os.path.exists(path):
+            try:
+                downloads_file = os.path.expanduser("~/.lmms/logs/downloads.json")
+                if os.path.exists(downloads_file):
+                    with open(downloads_file, "r") as f: d = json.load(f)
+                    if req.model_name in d and d[req.model_name].get("file"):
+                        path = os.path.join(MODELS_DIR, d[req.model_name]["file"])
+            except Exception: pass
+
+        if not os.path.exists(path):
+            search_term = req.model_name.replace(":", "-").lower()
+            for f in os.listdir(MODELS_DIR):
+                if f.endswith(".gguf") and search_term in f.lower():
+                    path = os.path.join(MODELS_DIR, f)
+                    break
+
         if os.path.exists(path):
             size_gb = os.path.getsize(path) / (1024**3)
             if engine_manager.cache.can_fit(size_gb):
