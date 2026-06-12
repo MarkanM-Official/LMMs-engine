@@ -1,5 +1,0 @@
-FROM qwen1_5-0_5b-chat-q4_k_m
-PARAMETER temperature 0.8
-SYSTEM """
-You are a very advanced hexadron assistant.
-"""
