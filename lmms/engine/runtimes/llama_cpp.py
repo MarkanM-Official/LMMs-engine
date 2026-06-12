@@ -2,9 +2,15 @@ import os
 import threading
 from typing import Dict, Any, Optional
 from lmms.engine.runtimes.base import RuntimeContract
-
 try:
+    import llama_cpp
     from llama_cpp import Llama
+    import ctypes
+    def silent_log_callback(level, text, user_data):
+        pass
+    # Keep a global reference to prevent garbage collection which causes SegFault!
+    _log_callback_wrapper = ctypes.CFUNCTYPE(None, ctypes.c_int, ctypes.c_char_p, ctypes.c_void_p)(silent_log_callback)
+    llama_cpp.llama_log_set(_log_callback_wrapper, ctypes.c_void_p())
 except Exception as e:
     print(f"Warning: Failed to import llama_cpp: {e}")
     Llama = None

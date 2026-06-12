@@ -392,6 +392,36 @@ Launcher Commands:
                 time.sleep(1)
                 print(f"[{model_name}] Created successfully.")
                 sys.exit(0)
+            elif cmd == "update":
+                print("\033[96mChecking for LMMs Engine updates...\033[0m")
+                import urllib.request
+                import platform
+                import stat
+                
+                system = platform.system().lower()
+                if system == "windows":
+                    binary_name = "lmms-engine-windows-amd64.exe"
+                    install_path = os.path.expandvars("%LOCALAPPDATA%\\LMMs\\bin\\lmms.exe")
+                elif system == "linux":
+                    binary_name = "lmms-engine-linux-amd64"
+                    install_path = "/usr/local/bin/lmms"
+                    if not os.access("/usr/local/bin", os.W_OK):
+                        install_path = os.path.expanduser("~/.local/bin/lmms")
+                else:
+                    print(f"Update not supported on {system}")
+                    sys.exit(1)
+                    
+                download_url = f"https://github.com/MarkanM-Official/LMMs-engine/releases/latest/download/{binary_name}"
+                
+                try:
+                    print(f"Downloading latest binary from: {download_url}")
+                    urllib.request.urlretrieve(download_url, install_path)
+                    if system != "windows":
+                        os.chmod(install_path, os.stat(install_path).st_mode | stat.S_IEXEC)
+                    print("\033[92mUpdate successful! LMMs Engine is now on the latest version.\033[0m")
+                except Exception as e:
+                    print(f"\033[91mFailed to update: {e}\033[0m")
+                sys.exit(0)
                 
             elif cmd == "run" and model_args:
                 model_name = model_args[0]
@@ -426,8 +456,8 @@ Launcher Commands:
                     from lmms.engine.runtimes.llama_cpp import LlamaCppRuntime
                     runtime = LlamaCppRuntime()
                     runtime.load_model(path)
-                    print(f"Started interactive engine session with {model_name} (Mode: {mode_arg})")
-                    
+                    print(f"\033[92mWelcome on LMMs engine powerd by MarkanM\033[0m")
+                    print(f"\033[96mfor more detailes visit the LMMs.markanm.com\033[0m\n")
                     messages = []
                     # If prompt provided as arg, run it and exit
                     if prompt_parts:
