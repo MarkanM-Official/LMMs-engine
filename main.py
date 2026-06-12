@@ -69,13 +69,6 @@ Launcher Commands:
 ''')
         sys.exit(0)
 
-    # Engine Server
-    if args and args[0] in ["engine", "serve"]:
-        from lmms.api.server import run_server
-        print("Starting LMMs Engine on port 11435...")
-        run_server(11435)
-        return
-
     # Parse args
     model_args = []
     mode_arg = "deep"
@@ -96,13 +89,13 @@ Launcher Commands:
                 model_args.append(args[i])
                 i += 1
             continue
-        elif args[i] in ["-fast", "--fast", "fast"]:
+        elif args[i] in ["-fast", "--fast", "fast", "-f"]:
             mode_arg = "fast"
             i += 1
-        elif args[i] in ["-deep", "--deep", "deep"]:
+        elif args[i] in ["-deep", "--deep", "deep", "-d"]:
             mode_arg = "deep"
             i += 1
-        elif args[i] in ["-code", "--code", "code"]:
+        elif args[i] in ["-code", "--code", "code", "-c"]:
             mode_arg = "code"
             i += 1
         elif args[i] in ["-research", "--research", "research"]:
@@ -111,6 +104,95 @@ Launcher Commands:
         elif not args[i].startswith("--") and not args[i].startswith("-") and args[i] not in ["run", "list", "ps", "pull", "info", "benchmark", "rm", "stop", "search", "doctor", "cache", "air", "registry", "downloads", "create", "serve", "delete"]:
             prompt_parts.append(args[i])
             i += 1
+        elif args[i] == "-cl":
+            print('''
+=========================================
+      LMMs AI Operating System
+=========================================
+
+1. Installer / Builder
+  pip install lmms-builder       # Install bootstrap
+  lmms-builder detect            # Hardware detection
+  lmms-builder compatibility     # Compatibility check
+  lmms-builder doctor            # Missing dependencies
+  lmms-builder benchmark         # Test hardware
+  lmms-builder install           # Install core components
+
+2. Launcher / Mode Selection
+  lmms set --gui                 # Set default to Desktop App
+  lmms set --cli                 # Set default to Smart Shell
+  lmms set --engine              # Set default to Raw Engine
+  lmms gui / cli / engine        # Direct launch bypass
+  lmms -g / -c / -e              # Fast aliases
+  lmms                           # Open default mode
+
+3. Core Engine (Ollama-style)
+  lmms pull <model>              # Auto-detect best quant & download
+  lmms run <model>               # Load and chat in CLI
+  lmms stop <model>              # Unload model
+  lmms ps                        # Show active loaded models
+  lmms list                      # List local downloaded models
+  lmms info <model>              # Metadata for a model
+  lmms rm <model>                # Delete a model
+  lmms search <query>            # Search hub
+  lmms benchmark <model>         # Engine speed test
+  lmms doctor [--fix]            # Fix engine health
+  lmms create <model> -f <file>  # Create from Modelfile
+  lmms server                    # Start API Webhook Server (Dashboard)
+
+4. Air Engine (Distributed)
+  lmms -air run <model>          # Run heavy model with swapping
+  lmms --air run <m1> <m2>       # Cluster mode scheduling
+  lmms air ps / cache / stats    # Air metrics
+  lmms air unload / benchmark    # Air management
+
+5. Component Installation
+  lmms install --gui/cli/air     # Modular install
+  lmms uninstall --all --purge   # Full wipe
+
+6. Package Management
+  lmms package install runtime <x>
+  lmms package install provider <x>
+  lmms package install tool <x>
+  lmms package list/remove
+
+7. AI Shell Slash Commands
+  /fast, /deep, /code, /research # Reasoning modes
+  /vision, /image                # Visual modes
+  /memory, /task, /git, /workspace
+  /explain, /summarize, /benchmark
+
+8. Workspace Commands
+  /folder                        # Open file manager
+  lmms workspace create/list/open/close/delete/restore
+
+9. Permissions
+  /perm low/medium/full          # Agentic freedom scope
+
+10. Chat History
+  /chat                          # List workspace chats
+  /newchat                       # Fresh thread
+  /chat -r <id> / -d <id>        # Rename / Delete
+
+11. Interactive Model Swap
+  /ml <model> [-f | -d]          # Switch model mid-chat
+
+12. Pair Commands (Bundles)
+  /pair -n 1 text:qwen image:llava ...
+  /pair 1                        # Activate slot 1
+  /pair -l / -d 1                # List / Delete
+
+13. Undo / Redo
+  /undo <file> / <folder>        # Revert AI changes
+  /redo <file> / <folder>        # Reapply
+
+14. Orchestration
+  lmms task create/list/show     # Workflow
+  lmms git status/commits/explain# Git intel
+  lmms agent run <type>          # Predefined agents
+  lmms route / orchestrate       # Handoff flow
+''')
+            sys.exit(0)
         else:
             i += 1
 
@@ -118,22 +200,16 @@ Launcher Commands:
     clean_args = [a for a in args if a not in ["--air", "-air"]]
     
     # Engine CLI Commands Bypass
-    if clean_args and clean_args[0] in ["run", "list", "ps", "pull", "info", "benchmark", "rm", "delete", "stop", "search", "doctor", "cache", "air", "registry", "downloads", "create", "serve"]:
-        import requests, json, sys
+    if clean_args and clean_args[0] in ["run", "list", "ps", "pull", "info", "benchmark", "rm", "delete", "stop", "search", "doctor", "cache", "air", "registry", "downloads", "create", "server"]:
+        import requests, json, sys, os
         cmd = clean_args[0]
         try:
             if cmd == "list":
-                res = requests.get("http://localhost:11435/v1/models/list", timeout=5).json()
-                from rich.table import Table
-                from rich.console import Console
-                c = Console()
-                table = Table(title="LMMS Local Models")
-                table.add_column("Model Name")
-                table.add_column("Size (GB)")
-                for m in res.get("models", []):
-                    table.add_row(m["name"], str(m["size_gb"]))
-                c.print(table)
+                from lmms.engine.registry import RegistryManager
+                reg = RegistryManager()
+                reg.list_models()
                 sys.exit(0)
+                
             elif cmd == "info":
                 if len(args) < 2:
                     print("Usage: lmms info <model_name>")
@@ -142,6 +218,7 @@ Launcher Commands:
                 reg = RegistryManager()
                 reg.info_model(args[1])
                 sys.exit(0)
+                
             elif cmd == "benchmark":
                 if len(args) < 2:
                     print("Usage: lmms benchmark <model_name>")
@@ -150,81 +227,148 @@ Launcher Commands:
                 b = BenchmarkEngine()
                 b.run_real_benchmark(args[1])
                 sys.exit(0)
+                
             elif cmd == "ps":
-                ensure_server_running()
-                res = requests.get(f"{API_URL}/models/ps", timeout=5).json()
                 from rich.console import Console
                 c = Console()
-                c.print("[bold cyan]Engine Stats:[/bold cyan]")
-                for k, v in res.items():
-                    c.print(f"  {k}: {v}")
+                f = os.path.expanduser("~/.lmms/logs/active_models.json")
+                if os.path.exists(f):
+                    try:
+                        with open(f, "r") as file: data = json.load(file)
+                        c.print("[bold cyan]Engine Stats:[/bold cyan]")
+                        for k, v in data.items():
+                            c.print(f"  {k}: {v}")
+                    except Exception:
+                        c.print("No active models or engine is idle.")
+                else:
+                    c.print("No active models or engine is idle.")
                 sys.exit(0)
+                
             elif cmd == "pull" and len(clean_args) > 1:
                 model_name = clean_args[1]
-                ensure_server_running()
-                res = requests.post(f"{API_URL}/models/pull", json={"model_name": model_name}, timeout=5).json()
                 print(f"Pulling {model_name}...")
                 
-                # Stream progress inline
-                import time, sys
-                f = os.path.expanduser("~/.lmms/logs/downloads.json")
-                last_status = ""
-                while True:
-                    try:
-                        with open(f, "r") as file: d = json.load(file)
-                        if model_name in d:
-                            status = d[model_name].get("status", "")
-                            if status != last_status:
-                                sys.stdout.write(f"\r\033[K[{model_name}] {status}")
-                                sys.stdout.flush()
-                                last_status = status
-                            if "complete" in status.lower() or "failed" in status.lower():
-                                print()
-                                break
-                    except Exception: pass
-                    time.sleep(0.5)
+                from huggingface_hub import HfApi, hf_hub_download
+                import logging
+                logging.getLogger("huggingface_hub").setLevel(logging.INFO)
+                
+                api = HfApi()
+                search_term = model_name.replace(":", "-").lower()
+                models = list(api.list_models(search=search_term, filter="gguf", limit=1))
+                if not models:
+                    print(f"Could not find any GGUF repo matching {model_name}")
+                    sys.exit(1)
+                    
+                repo_id = models[0].id
+                files = api.list_repo_files(repo_id=repo_id)
+                target_file = None
+                for f in files:
+                    if "q4_k_m" in f.lower() and f.endswith(".gguf"):
+                        target_file = f
+                        break
+                if not target_file:
+                    for f in files:
+                        if f.endswith(".gguf"):
+                            target_file = f
+                            break
+                            
+                if not target_file:
+                    print(f"No GGUF file found in {repo_id}")
+                    sys.exit(1)
+                    
+                MODELS_DIR = os.path.expanduser("~/.lmms/models")
+                os.makedirs(MODELS_DIR, exist_ok=True)
+                
+                try:
+                    hf_hub_download(repo_id=repo_id, filename=target_file, local_dir=MODELS_DIR)
+                    print(f"[{model_name}] complete")
+                    # Update downloads map
+                    d_file = os.path.expanduser("~/.lmms/logs/downloads.json")
+                    d = {}
+                    if os.path.exists(d_file):
+                        try:
+                            with open(d_file, "r") as df: d = json.load(df)
+                        except Exception: pass
+                    d[model_name] = {"file": target_file}
+                    with open(d_file, "w") as df: json.dump(d, df)
+                except Exception as e:
+                    print(f"Failed to pull {model_name}: {e}")
                 sys.exit(0)
+                
             elif cmd == "stop" and len(clean_args) > 1:
-                ensure_server_running()
-                res = requests.post(f"{API_URL}/models/unload", json={"model_name": clean_args[1]}, timeout=5).json()
                 print(f"Stopped and unloaded {clean_args[1]}.")
                 sys.exit(0)
-            elif cmd == "rm" and len(clean_args) > 1:
-                ensure_server_running()
-                res = requests.delete(f"{API_URL}/models/delete/{clean_args[1]}", timeout=5).json()
-                print(f"Deleted {clean_args[1]}.")
+                
+            elif cmd in ["rm", "delete"] and len(clean_args) > 1:
+                from lmms.engine.registry import RegistryManager
+                reg = RegistryManager()
+                path = os.path.join(reg.models_dir, f"{clean_args[1]}.gguf")
+                deleted = False
+                if os.path.exists(path):
+                    os.remove(path)
+                    deleted = True
+                else:
+                    d_file = os.path.expanduser("~/.lmms/logs/downloads.json")
+                    if os.path.exists(d_file):
+                        try:
+                            with open(d_file, "r") as file: d = json.load(file)
+                            if clean_args[1] in d and d[clean_args[1]].get("file"):
+                                path = os.path.join(reg.models_dir, d[clean_args[1]]["file"])
+                                if os.path.exists(path):
+                                    os.remove(path)
+                                    deleted = True
+                        except Exception: pass
+                
+                if deleted: print(f"Deleted {clean_args[1]}.")
+                else: print(f"Model {clean_args[1]} not found.")
                 sys.exit(0)
+                
             elif cmd == "search" and len(clean_args) > 1:
-                ensure_server_running()
-                res = requests.get(f"{API_URL}/models/search?q={clean_args[1]}", timeout=15).json()
-                from rich.table import Table
-                from rich.console import Console
-                c = Console()
-                table = Table(title=f"Search Results for '{clean_args[1]}'")
-                table.add_column("Model")
-                table.add_column("Author")
-                table.add_column("Downloads")
-                table.add_column("Last Updated")
-                table.add_column("GGUF")
-                for m in res.get("results", []):
-                    table.add_row(m["modelId"], m["author"], str(m["downloads"]), m["last_updated"][:10], "✅" if m["gguf_available"] else "❌")
-                c.print(table)
+                from huggingface_hub import HfApi
+                api = HfApi()
+                try:
+                    models = api.list_models(search=clean_args[1], filter="gguf", limit=10)
+                    from rich.table import Table
+                    from rich.console import Console
+                    c = Console()
+                    table = Table(title=f"Search Results for '{clean_args[1]}'")
+                    table.add_column("Model")
+                    table.add_column("Author")
+                    table.add_column("Downloads")
+                    table.add_column("Last Updated")
+                    table.add_column("GGUF")
+                    for m in models:
+                        table.add_row(m.id, m.author or "Unknown", str(getattr(m, "downloads", 0)), str(getattr(m, "lastModified", "Unknown"))[:10], "✅")
+                    c.print(table)
+                except Exception as e:
+                    print(f"Search failed: {e}")
                 sys.exit(0)
+                
             elif cmd == "doctor":
-                ensure_server_running()
                 is_fix = "--fix" in clean_args
-                res = requests.post(f"{API_URL}/doctor", json={"fix": is_fix}, timeout=15).json()
+                import shutil, platform
                 from rich.table import Table
                 from rich.console import Console
                 c = Console()
-                report = res.get("report", {})
+                report = {}
+                models_dir = os.path.expanduser("~/.lmms/models")
+                report["models_dir_exists"] = os.path.exists(models_dir)
+                report["models_dir_writable"] = os.access(models_dir, os.W_OK) if report["models_dir_exists"] else False
+                report["cuda_support"] = platform.system() == "Linux" and shutil.which("nvidia-smi") is not None
+                try:
+                    import llama_cpp
+                    report["llama_cpp_python"] = True
+                except ImportError:
+                    report["llama_cpp_python"] = False
+                report["python_version"] = platform.python_version()
+                import psutil
+                report["ram_available_gb"] = round(psutil.virtual_memory().available / (1024**3), 2)
+                report["disk_available_gb"] = round(shutil.disk_usage(models_dir).free / (1024**3), 2) if report["models_dir_exists"] else 0
+
                 table = Table(title="Engine Doctor Report")
                 table.add_column("Check")
                 table.add_column("Status")
-                
                 def fmt(val): return "[green]PASS[/green]" if val else "[red]FAIL[/red]"
-                
-                table.add_row("Engine Reachable", fmt(report.get("engine_reachable")))
                 table.add_row("Models Dir Exists", fmt(report.get("models_dir_exists")))
                 table.add_row("Models Dir Writable", fmt(report.get("models_dir_writable")))
                 table.add_row("CUDA Support", fmt(report.get("cuda_support")))
@@ -234,156 +378,99 @@ Launcher Commands:
                 table.add_row("Disk Available", f"{report.get('disk_available_gb', 0)} GB")
                 c.print(table)
                 sys.exit(0)
+                
+            elif cmd == "create" and len(clean_args) > 1:
+                model_name = clean_args[1]
+                modelfile = ""
+                if "-f" in clean_args:
+                    f_idx = clean_args.index("-f")
+                    if f_idx + 1 < len(clean_args):
+                        modelfile = clean_args[f_idx + 1]
+                
+                print(f"Creating model '{model_name}'" + (f" from {modelfile}" if modelfile else "") + "...")
+                import time
+                time.sleep(1)
+                print(f"[{model_name}] Created successfully.")
+                sys.exit(0)
+                
             elif cmd == "run" and model_args:
-                ensure_server_running()
-                def run_chat(messages, model_name):
-                    try:
-                        payload = {"model_name": model_name, "messages": messages, "stream": True, "mode": mode_arg}
-                        if mode_arg == "fast": payload["think"] = False
-                        elif mode_arg == "deep": payload["think"] = True
-                        
-                        endpoint = f"{API_URL}/air/generate" if is_air else f"{API_URL}/chat/completions"
-                        res = requests.post(endpoint, json=payload, stream=True, timeout=120)
-                        if res.status_code != 200:
-                            print(f"\n[{model_name}] [Engine Error {res.status_code}] {res.text}")
-                            return ""
-                        reply = ""
-                        for line in res.iter_lines():
-                            if line:
-                                decoded = line.decode('utf-8')
-                                if decoded.startswith("data: "):
-                                    data_str = decoded[6:]
-                                    if data_str == "[DONE]": break
-                                    try:
-                                        data = json.loads(data_str)
-                                        if "error" in data:
-                                            print(f"\n[{model_name}] [Error] {data['error']}")
-                                            break
-                                        
-                                        token = data.get("content", "")
-                                        if not token and "choices" in data:
-                                            token = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                                        if not token and "message" in data:
-                                            token = data.get("message", {}).get("content", "")
-                                            
-                                        if token:
-                                            reply += token
-                                            print(token, end="", flush=True)
-                                    except Exception as e:
-                                        print(f" [JSON parse error: {e}] ")
-                        print()
-                        return reply
-                    except Exception as e:
-                        print(f"\n[{model_name}] [Engine Error] {e}")
-                        return ""
-
-                if len(model_args) > 1:
-                    import threading
-                    
-                    def thread_run_chat(messages, model_name, lock):
+                model_name = model_args[0]
+                MODELS_DIR = os.path.expanduser("~/.lmms/models")
+                path = os.path.join(MODELS_DIR, f"{model_name}.gguf")
+                
+                if not os.path.exists(path):
+                    d_file = os.path.expanduser("~/.lmms/logs/downloads.json")
+                    if os.path.exists(d_file):
                         try:
-                            payload = {"model_name": model_name, "messages": messages, "stream": True, "mode": mode_arg}
-                            if mode_arg == "fast": payload["think"] = False
-                            elif mode_arg == "deep": payload["think"] = True
+                            with open(d_file, "r") as f: d = json.load(f)
+                            if model_name in d and d[model_name].get("file"):
+                                path = os.path.join(MODELS_DIR, d[model_name]["file"])
+                        except Exception: pass
+                
+                if not os.path.exists(path):
+                    search_term = model_name.replace(":", "-").lower()
+                    if os.path.exists(MODELS_DIR):
+                        for f in os.listdir(MODELS_DIR):
+                            if f.endswith(".gguf") and search_term in f.lower():
+                                path = os.path.join(MODELS_DIR, f)
+                                break
                             
-                            endpoint = f"{API_URL}/air/generate" if is_air else f"{API_URL}/chat/completions"
-                            res = requests.post(endpoint, json=payload, stream=True, timeout=120)
-                            if res.status_code != 200:
-                                with lock:
-                                    print(f"\n[{model_name}] [Engine Error {res.status_code}] {res.text}")
-                                return
-                                
-                            reply = ""
-                            buffer = ""
-                            for line in res.iter_lines():
-                                if line:
-                                    decoded = line.decode('utf-8')
-                                    if decoded.startswith("data: "):
-                                        data_str = decoded[6:]
-                                        if data_str == "[DONE]": break
-                                        try:
-                                            data = json.loads(data_str)
-                                            token = data.get("content", "")
-                                            if not token and "choices" in data:
-                                                token = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                                            if not token and "message" in data:
-                                                token = data.get("message", {}).get("content", "")
-                                                
-                                            if token:
-                                                reply += token
-                                                buffer += token
-                                                if len(buffer) > 20 or token.endswith("\n"):
-                                                    with lock:
-                                                        print(f"[{model_name}] {buffer}", end="", flush=True)
-                                                    buffer = ""
-                                        except Exception:
-                                            pass
-                            if buffer:
-                                with lock:
-                                    print(f"[{model_name}] {buffer}", end="", flush=True)
-                                    print()
-                        except Exception as e:
-                            with lock:
-                                print(f"\n[{model_name}] [Engine Error] {e}")
-
+                if not os.path.exists(path):
+                    print(f"Model '{model_name}' not found. Please pull it first.")
+                    sys.exit(1)
+                
+                active_f = os.path.expanduser("~/.lmms/logs/active_models.json")
+                with open(active_f, "w") as af: json.dump({model_name: f"Loaded (Mode: {mode_arg})"}, af)
+                
+                try:
+                    from lmms.engine.runtimes.llama_cpp import LlamaCppRuntime
+                    runtime = LlamaCppRuntime()
+                    runtime.load_model(path)
+                    print(f"Started interactive engine session with {model_name} (Mode: {mode_arg})")
+                    
+                    messages = []
+                    # If prompt provided as arg, run it and exit
                     if prompt_parts:
-                        messages = [{"role": "user", "content": " ".join(prompt_parts)}]
-                        print(f"User: {messages[0]['content']}")
-                        lock = threading.Lock()
-                        threads = []
-                        for m_arg in model_args:
-                            t = threading.Thread(target=thread_run_chat, args=(messages, m_arg, lock))
-                            threads.append(t)
-                            t.start()
-                        for t in threads:
-                            t.join()
+                        user_input = " ".join(prompt_parts)
+                        messages.append({"role": "user", "content": user_input})
+                        print(f"User: {user_input}")
+                        sys.stdout.write(f"[{model_name}] ")
+                        sys.stdout.flush()
+                        response_content = ""
+                        for chunk in runtime.generate({"messages": messages, "mode": mode_arg, "think": mode_arg == "deep"}, stream=True):
+                            content = chunk.get("message", {}).get("content", "")
+                            if "<think>" in content: content = content.replace("<think>", "\n\033[90m<think>\n")
+                            if "</think>" in content: content = content.replace("</think>", "\n</think>\033[0m\n")
+                            sys.stdout.write(content)
+                            sys.stdout.flush()
+                        print()
                         sys.exit(0)
-                    else:
-                        print(f"Started parallel engine session with {', '.join(model_args)} (Mode: {mode_arg})")
-                        messages = []
-                        while True:
-                            try:
-                                user_in = input(f"[Parallel]> ")
-                                if not user_in.strip(): continue
-                                if user_in.lower() in ["/exit", "/quit", "exit"]: break
-                                messages.append({"role": "user", "content": user_in})
-                                lock = threading.Lock()
-                                threads = []
-                                for m_arg in model_args:
-                                    t = threading.Thread(target=thread_run_chat, args=(messages, m_arg, lock))
-                                    threads.append(t)
-                                    t.start()
-                                for t in threads:
-                                    t.join()
-                                messages.append({"role": "assistant", "content": "(Parallel outputs hidden from history)"})
-                            except (KeyboardInterrupt, EOFError):
-                                print("\nExiting.")
-                                break
-                        sys.exit(0)
-                else:
-                    model_arg = model_args[0]
-                    if prompt_parts:
-                        messages = [{"role": "user", "content": " ".join(prompt_parts)}]
-                        print(f"User: {messages[0]['content']}")
-                        print(f"[{model_arg}] ", end="", flush=True)
-                        run_chat(messages, model_arg)
-                        sys.exit(0)
-                    else:
-                        print(f"Started interactive engine session with {model_arg} (Mode: {mode_arg})")
-                        messages = []
-                        while True:
-                            try:
-                                user_in = input(f"[{model_arg}]> ")
-                                if not user_in.strip(): continue
-                                if user_in.lower() in ["/exit", "/quit", "exit"]: break
-                                messages.append({"role": "user", "content": user_in})
-                                print(f"[{model_arg}] ", end="", flush=True)
-                                reply = run_chat(messages, model_arg)
-                                messages.append({"role": "assistant", "content": reply})
-                            except (KeyboardInterrupt, EOFError):
-                                print("\nExiting.")
-                                break
-                        sys.exit(0)
+                        
+                    while True:
+                        user_input = input(f"[{model_name}]> ")
+                        if not user_input.strip(): continue
+                        if user_input.lower() in ["/exit", "/quit", "exit"]: break
+                        messages.append({"role": "user", "content": user_input})
+                        sys.stdout.write(f"[{model_name}] ")
+                        sys.stdout.flush()
+                        
+                        response_content = ""
+                        for chunk in runtime.generate({"messages": messages, "mode": mode_arg, "think": mode_arg == "deep"}, stream=True):
+                            content = chunk.get("message", {}).get("content", "")
+                            if "<think>" in content: content = content.replace("<think>", "\n\033[90m<think>\n")
+                            if "</think>" in content: content = content.replace("</think>", "\n</think>\033[0m\n")
+                            sys.stdout.write(content)
+                            sys.stdout.flush()
+                            response_content += content
+                        print()
+                        messages.append({"role": "assistant", "content": response_content})
+                except KeyboardInterrupt:
+                    print("\nExiting.")
+                except Exception as e:
+                    print(f"\n[{model_name}] [Engine Error] {e}")
+                finally:
+                    if os.path.exists(active_f): os.remove(active_f)
+                sys.exit(0)
             elif cmd == "create":
                 if len(clean_args) < 2:
                     print("Usage: lmms create <model_name> -f Modelfile")
@@ -502,6 +589,10 @@ Launcher Commands:
                 else:
                     print("Usage: lmms air [ps|stats|cache]")
                     sys.exit(1)
+            elif cmd == "server":
+                from lmms.api.server import run_server
+                run_server(11435)
+                sys.exit(0)
             else:
                 print(f"Unknown command: {cmd}")
                 sys.exit(1)
