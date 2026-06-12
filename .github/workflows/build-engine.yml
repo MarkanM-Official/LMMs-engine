@@ -1,0 +1,92 @@
+name: Build and Release LMMs Engine Binaries
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: lmms-engine-linux-amd64
+            executable_name: lmms-engine-linux-amd64
+          - os: windows-latest
+            artifact_name: lmms-engine-windows-amd64.exe
+            executable_name: lmms-engine-windows-amd64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller cython
+
+      - name: Build Binary with PyInstaller (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller --onefile --name ${{ matrix.executable_name }} main.py
+
+      - name: Build Binary with PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          pyinstaller --onefile --name ${{ matrix.executable_name }} main.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.executable_name }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Linux Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lmms-engine-linux-amd64
+          path: dist
+
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: lmms-engine-windows-amd64.exe
+          path: dist
+
+      - name: Delete old release (if exists)
+        uses: dev-drprasad/delete-tag-and-release@v0.2.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: latest
+          delete_release: true
+        continue-on-error: true
+
+      - name: Create New Latest Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: "LMMs Engine Latest Build"
+          tag_name: "latest"
+          files: |
+            dist/lmms-engine-linux-amd64
+            dist/lmms-engine-windows-amd64.exe
+          prerelease: false
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
