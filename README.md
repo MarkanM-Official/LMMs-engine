@@ -77,4 +77,6 @@ LMMs Engine operates as a standalone orchestrator. It uses `ctypes` bindings via
 When compiled via PyInstaller, the Engine bundles the C++ `.so` or `.dll` shared libraries natively, meaning end-users do not need Python, C-compilers, or dependencies installed on their machine!
 
 ## 📜 License
-Developed by MarkanM. See the LICENSE file for details.
+This project is licensed under the Apache License, Version 2.0.
+See the [LICENSE](LICENSE) file for details.
+Developed by MarkanM.
