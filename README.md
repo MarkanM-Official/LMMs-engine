@@ -79,4 +79,5 @@ When compiled via PyInstaller, the Engine bundles the C++ `.so` or `.dll` shared
 ## 📜 License
 This project is licensed under the Apache License, Version 2.0.
 See the [LICENSE](LICENSE) file for details.
-Developed by MarkanM.
+Developed by Raj Singh (MarkanM).
+Copyright (c) 2026.
