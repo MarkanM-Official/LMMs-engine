@@ -23,7 +23,7 @@ def ensure_server_running():
         log_file = os.path.expanduser("~/.lmms/logs/server.log")
         with open(log_file, "a") as f:
             engine_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "main.py")
-            subprocess.Popen([sys.executable, engine_script, "serve"], stdout=f, stderr=f)
+            subprocess.Popen([sys.executable, engine_script, "server"], stdout=f, stderr=f)
         time.sleep(2)
 
 def main():
