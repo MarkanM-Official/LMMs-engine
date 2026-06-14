@@ -79,6 +79,7 @@ Launcher Commands:
     mode_arg = "deep"
     prompt_parts = []
     is_air = False
+    forced_engine = None
     
     # Modality Flags
     modality_vc = False
@@ -128,6 +129,13 @@ Launcher Commands:
         elif args[i].lower() == "-all":
             modality_all = True
             i += 1
+        elif args[i] == "-use" and i + 1 < len(args):
+            use_engine = args[i+1].lower()
+            if use_engine in ["-l", "l", "llama"]:
+                forced_engine = "llama"
+            elif use_engine in ["-p", "p", "pytorch"]:
+                forced_engine = "pytorch"
+            i += 2
         elif not args[i].startswith("--") and not args[i].startswith("-") and args[i] not in ["run", "list", "ps", "pull", "info", "benchmark", "rm", "stop", "search", "doctor", "cache", "air", "registry", "downloads", "create", "serve", "delete"]:
             prompt_parts.append(args[i])
             i += 1
@@ -538,6 +546,9 @@ Launcher Commands:
                     "qwen2.5-vl": "Qwen/Qwen2.5-VL-3B-Instruct"
                 }
                 
+                # Models that STRICTLY require PyTorch support engine because they lack llama.cpp chat handlers
+                pytorch_only_models = ["smolvlm2", "qwen3-vl"]
+                
                 is_vlm = False
                 vlm_repo = None
                 for key, repo in vlm_hf_map.items():
@@ -546,15 +557,33 @@ Launcher Commands:
                         vlm_repo = repo
                         break
                         
+                # Determine Engine
+                engine_to_use = "llama" # Default lightweight engine
+                
+                if forced_engine:
+                    engine_to_use = forced_engine
+                else:
+                    requires_pytorch = any(m in model_name.lower() for m in pytorch_only_models)
+                    if requires_pytorch:
+                        print(f"\n\033[93m[Warning]\033[0m The model '{model_name}' requires the heavy PyTorch Support Engine.")
+                        print("This package can run experimental models but uses massive resources (CUDA/PyTorch).")
+                        choice = input("Would you like to load the Support Engine? (y/n): ")
+                        if choice.strip().lower() == "y":
+                            engine_to_use = "pytorch"
+                        else:
+                            print("\033[91mAborted.\033[0m We recommend using 'Qwen2.5-VL' or 'LLaVA' for native lightweight llama.cpp support.")
+                            sys.exit(0)
+                        
                 try:
                     from rich.console import Console
                     console = Console()
                     
-                    if is_vlm:
+                    if engine_to_use == "pytorch":
                         from lmms.engine.runtimes.hf_vision import HfVisionRuntime
                         runtime = HfVisionRuntime()
-                        # Pass repo ID instead of gguf path
-                        if not runtime.load_model(vlm_repo):
+                        # Fallback if someone forces PyTorch for a text model
+                        repo_to_load = vlm_repo if vlm_repo else model_name
+                        if not runtime.load_model(repo_to_load):
                             sys.exit(1)
                     else:
                         from lmms.engine.runtimes.llama_cpp import LlamaCppRuntime
