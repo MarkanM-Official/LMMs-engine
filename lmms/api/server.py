@@ -145,7 +145,9 @@ def air_generate(req: ChatRequest):
             raise Exception("Insufficient VRAM to load this model, even after eviction.")
             
         # Physically load it
-        engine_manager.runtime.load_model(path)
+        success = engine_manager.runtime.load_model(path)
+        if not success:
+            raise HTTPException(status_code=500, detail="Engine failed to load model into VRAM (Possible OOM or driver issue).")
         
         # Logically update the swapper
         if model_name in engine_manager.air_scheduler.active_models:
@@ -695,6 +697,7 @@ def run_server(port: int = 11435):
     
     print(f"===========================================================")
     print(f"             LMMs Secure API Server Started                ")
+    print(f"       Powered by MarkanM. For more details: Lmms.markanm.com")
     print(f"===========================================================")
     print(f" -> Dashboard: http://localhost:{port}/dashboard")
     print(f"")

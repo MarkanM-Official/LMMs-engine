@@ -4,7 +4,7 @@ from typing import Dict, Any, Optional
 from lmms.engine.runtimes.base import RuntimeContract
 try:
     import llama_cpp
-    from llama_cpp import Llama
+    from llama_cpp import Llama, LlamaRAMCache
     import ctypes
     def silent_log_callback(level, text, user_data):
         pass
@@ -48,11 +48,18 @@ class LlamaCppRuntime(RuntimeContract):
             model_instance = Llama(
                 model_path=full_path,
                 n_gpu_layers=-1, # All layers to GPU
-                n_ctx=2048,
+                n_ctx=8192,
+                flash_attn=True,
+                chat_format="chatml",
                 verbose=False
             )
             # Use base filename as key if path was given
             key = os.path.basename(full_path).replace(".gguf", "")
+            
+            # Add cache to avoid re-evaluating system prompt
+            cache = LlamaRAMCache(capacity_bytes=1024 * 1024 * 1024) # 1GB Cache
+            model_instance.set_cache(cache)
+            
             self._models[key] = model_instance
             return True
         except Exception as e:

@@ -21,7 +21,7 @@ class RegistryManager:
         raw_models = {}
         for f in os.listdir(self.models_dir):
             if f.endswith(".gguf"):
-                size_gb = os.path.getsize(os.path.join(self.models_dir, f)) / (1024**3)
+                size_gb = os.path.getsize(os.path.join(self.models_dir, f)) / (1000**3)
                 raw_models[f.replace(".gguf", "")] = size_gb
 
         # List manifests (custom tags)
@@ -87,12 +87,12 @@ class RegistryManager:
             base = data.get("base_model", "")
             base_path = os.path.join(self.models_dir, f"{base}.gguf") if not base.endswith(".gguf") else os.path.join(self.models_dir, base)
             if os.path.exists(base_path):
-                info["Size"] = f"{os.path.getsize(base_path) / (1024**3):.2f} GB"
+                info["Size"] = f"{os.path.getsize(base_path) / (1000**3):.2f} GB"
                 info["Path"] = base_path
             else:
                 info["Path"] = f"{base_path} (Missing)"
         elif os.path.exists(gguf_path):
-            info["Size"] = f"{os.path.getsize(gguf_path) / (1024**3):.2f} GB"
+            info["Size"] = f"{os.path.getsize(gguf_path) / (1000**3):.2f} GB"
             info["Path"] = gguf_path
         else:
             c.print(f"[red]Model '{tag}' not found in registry.[/red]")

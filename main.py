@@ -9,6 +9,10 @@ import os
 import subprocess
 import json
 
+ENGINE_DIR = os.path.dirname(os.path.abspath(__file__))
+if ENGINE_DIR not in sys.path:
+    sys.path.insert(0, ENGINE_DIR)
+
 API_URL = "http://localhost:11435/v1"
 def is_root():
     return os.geteuid() == 0
@@ -276,13 +280,24 @@ Launcher Commands:
                 logging.getLogger("huggingface_hub").setLevel(logging.INFO)
                 
                 api = HfApi()
-                search_term = model_name.replace(":", "-").lower()
-                models = list(api.list_models(search=search_term, filter="gguf", limit=1))
-                if not models:
-                    print(f"Could not find any GGUF repo matching {model_name}")
-                    sys.exit(1)
-                    
-                repo_id = models[0].id
+                
+                if "/" in model_name:
+                    repo_id = model_name
+                else:
+                    search_term = model_name.replace(":", "-").lower()
+                    models = list(api.list_models(search=search_term, filter="gguf", limit=10, sort="downloads"))
+                    if not models:
+                        print(f"Could not find any GGUF repo matching {model_name}")
+                        sys.exit(1)
+                        
+                    best_match = models[0]
+                    for m in models:
+                        repo_name = m.id.split("/")[-1].lower()
+                        if search_term == repo_name or search_term + "-gguf" == repo_name:
+                            best_match = m
+                            break
+                            
+                    repo_id = best_match.id
                 files = api.list_repo_files(repo_id=repo_id)
                 target_file = None
                 for f in files:
@@ -305,6 +320,15 @@ Launcher Commands:
                 try:
                     hf_hub_download(repo_id=repo_id, filename=target_file, local_dir=MODELS_DIR)
                     print(f"[{model_name}] complete")
+                    
+                    # Create a manifest for the pulled model so it shows up properly in registry
+                    manifests_dir = os.path.expanduser("~/.lmms/manifests")
+                    os.makedirs(manifests_dir, exist_ok=True)
+                    safe_name = model_name.split("/")[-1]
+                    manifest_path = os.path.join(manifests_dir, f"{safe_name}.json")
+                    with open(manifest_path, "w") as f:
+                        json.dump({"base_model": target_file}, f)
+                        
                     # Update downloads map
                     d_file = os.path.expanduser("~/.lmms/logs/downloads.json")
                     d = {}
@@ -314,8 +338,11 @@ Launcher Commands:
                         except Exception: pass
                     d[model_name] = {"file": target_file}
                     with open(d_file, "w") as df: json.dump(d, df)
+                except KeyboardInterrupt:
+                    print(f"\n[!] Download of {model_name} cancelled by user.")
+                    sys.exit(130)
                 except Exception as e:
-                    print(f"Failed to pull {model_name}: {e}")
+                    print(f"\nFailed to pull {model_name}: {e}")
                 sys.exit(0)
                 
             elif cmd == "stop" and len(clean_args) > 1:
@@ -325,25 +352,32 @@ Launcher Commands:
             elif cmd in ["rm", "delete"] and len(clean_args) > 1:
                 from lmms.engine.registry import RegistryManager
                 reg = RegistryManager()
-                path = os.path.join(reg.models_dir, f"{clean_args[1]}.gguf")
-                deleted = False
-                if os.path.exists(path):
-                    os.remove(path)
-                    deleted = True
-                else:
-                    d_file = os.path.expanduser("~/.lmms/logs/downloads.json")
-                    if os.path.exists(d_file):
-                        try:
-                            with open(d_file, "r") as file: d = json.load(file)
-                            if clean_args[1] in d and d[clean_args[1]].get("file"):
-                                path = os.path.join(reg.models_dir, d[clean_args[1]]["file"])
-                                if os.path.exists(path):
-                                    os.remove(path)
+                models_to_delete = clean_args[1:]
+                for model_name in models_to_delete:
+                    path = os.path.join(reg.models_dir, f"{model_name}.gguf")
+                    deleted = False
+                    if os.path.exists(path):
+                        os.remove(path)
+                        deleted = True
+                    else:
+                        d_file = os.path.expanduser("~/.lmms/logs/downloads.json")
+                        if os.path.exists(d_file):
+                            try:
+                                with open(d_file, "r") as file: d = json.load(file)
+                                if model_name in d and d[model_name].get("file"):
+                                    path = os.path.join(reg.models_dir, d[model_name]["file"])
+                                    if os.path.exists(path):
+                                        os.remove(path)
+                                        deleted = True
+                            except Exception: pass
+                        if not deleted:
+                            for f in os.listdir(reg.models_dir):
+                                if f.startswith(model_name) and f.endswith(".gguf"):
+                                    os.remove(os.path.join(reg.models_dir, f))
                                     deleted = True
-                        except Exception: pass
-                
-                if deleted: print(f"Deleted {clean_args[1]}.")
-                else: print(f"Model {clean_args[1]} not found.")
+                                    break
+                    if deleted: print(f"Deleted {model_name}.")
+                    else: print(f"Model {model_name} not found.")
                 sys.exit(0)
                 
             elif cmd == "search" and len(clean_args) > 1:
@@ -498,15 +532,37 @@ Launcher Commands:
                 active_f = os.path.expanduser("~/.lmms/logs/active_models.json")
                 with open(active_f, "w") as af: json.dump({model_name: f"Loaded (Mode: {mode_arg})"}, af)
                 
+                vlm_hf_map = {
+                    "smolvlm2": "HuggingFaceTB/SmolVLM2-2.2B-Instruct",
+                    "qwen3-vl": "Qwen/Qwen3-VL-8B-Instruct",
+                    "qwen2.5-vl": "Qwen/Qwen2.5-VL-3B-Instruct"
+                }
+                
+                is_vlm = False
+                vlm_repo = None
+                for key, repo in vlm_hf_map.items():
+                    if key in model_name.lower():
+                        is_vlm = True
+                        vlm_repo = repo
+                        break
+                        
                 try:
-                    from lmms.engine.runtimes.llama_cpp import LlamaCppRuntime
                     from rich.console import Console
                     console = Console()
                     
-                    runtime = LlamaCppRuntime()
-                    runtime.load_model(path)
+                    if is_vlm:
+                        from lmms.engine.runtimes.hf_vision import HfVisionRuntime
+                        runtime = HfVisionRuntime()
+                        # Pass repo ID instead of gguf path
+                        if not runtime.load_model(vlm_repo):
+                            sys.exit(1)
+                    else:
+                        from lmms.engine.runtimes.llama_cpp import LlamaCppRuntime
+                        runtime = LlamaCppRuntime()
+                        runtime.load_model(path)
+                        
                     print(f"\033[92mWelcome on LMMs engine powerd by MarkanM\033[0m")
-                    print(f"\033[96mfor more detailes visit the LMMs.markanm.com\033[0m\n")
+                    print(f"\033[96mfor more details visit \033]8;;https://lmms.markanm.com\033\\https://lmms.markanm.com\033]8;;\033\\\033[0m\n")
                     
                     # Multimodal Auto-Detect UI
                     if modality_vc:
@@ -521,15 +577,45 @@ Launcher Commands:
                         console.print("[bold yellow]🔥 Full Multimodal Mode (Voice + Vision + Text)[/bold yellow]")
                         console.print("[dim]Listening & Watching... ( ▂▃▄▅▆▇█ )[/dim]\n")
                     else:
-                        # Auto-detect placeholder message
-                        if "vision" in model_name.lower() or "vl" in model_name.lower():
-                            console.print("[dim magenta]Auto-detected Vision capabilities. Screen aware mode enabled.[/dim magenta]\n")
+                        pass
                     
                     messages = []
                     # If prompt provided as arg, run it and exit
                     if prompt_parts:
                         user_input = " ".join(prompt_parts)
-                        messages.append({"role": "user", "content": user_input})
+                        
+                        screen_keywords = ["screen", "screenshot", "see", "look"]
+                        takes_screenshot = is_vlm and any(kw in user_input.lower() for kw in screen_keywords)
+                        
+                        if takes_screenshot:
+                            try:
+                                import mss
+                                import base64
+                                import tempfile
+                                
+                                console.print("[dim magenta]📸 Capturing screen...[/dim magenta]")
+                                with mss.mss() as sct:
+                                    monitor = sct.monitors[0]
+                                    sct_img = sct.grab(monitor)
+                                    import mss.tools
+                                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+                                        mss.tools.to_png(sct_img.rgb, sct_img.size, level=9, output=tf.name)
+                                        with open(tf.name, "rb") as image_file:
+                                            b64_data = base64.b64encode(image_file.read()).decode("utf-8")
+                                        os.unlink(tf.name)
+                                messages.append({
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_data}"}},
+                                        {"type": "text", "text": user_input}
+                                    ]
+                                })
+                            except Exception as e:
+                                console.print(f"[red]Failed to capture screen: {e}[/red]")
+                                messages.append({"role": "user", "content": user_input})
+                        else:
+                            messages.append({"role": "user", "content": user_input})
+                            
                         print(f"User: {user_input}")
                         sys.stdout.write(f"[{model_name}] ")
                         sys.stdout.flush()
@@ -547,7 +633,42 @@ Launcher Commands:
                         user_input = input(f"[{model_name}]> ")
                         if not user_input.strip(): continue
                         if user_input.lower() in ["/exit", "/quit", "exit"]: break
-                        messages.append({"role": "user", "content": user_input})
+                        
+                        screen_keywords = ["screen", "screenshot", "see", "look"]
+                        takes_screenshot = is_vlm and any(kw in user_input.lower() for kw in screen_keywords)
+                        
+                        if takes_screenshot:
+                            try:
+                                import mss
+                                import base64
+                                import tempfile
+                                
+                                console.print("[dim magenta]📸 Capturing screen...[/dim magenta]")
+                                with mss.mss() as sct:
+                                    monitor = sct.monitors[0]
+                                    sct_img = sct.grab(monitor)
+                                    
+                                    # Convert to base64 PNG
+                                    import mss.tools
+                                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
+                                        mss.tools.to_png(sct_img.rgb, sct_img.size, level=9, output=tf.name)
+                                        with open(tf.name, "rb") as image_file:
+                                            b64_data = base64.b64encode(image_file.read()).decode("utf-8")
+                                        os.unlink(tf.name)
+                                        
+                                messages.append({
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_data}"}},
+                                        {"type": "text", "text": user_input}
+                                    ]
+                                })
+                            except Exception as e:
+                                console.print(f"[red]Failed to capture screen: {e}[/red]")
+                                messages.append({"role": "user", "content": user_input})
+                        else:
+                            messages.append({"role": "user", "content": user_input})
+                            
                         sys.stdout.write(f"[{model_name}] ")
                         sys.stdout.flush()
                         
