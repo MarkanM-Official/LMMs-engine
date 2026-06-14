@@ -617,8 +617,9 @@ def main():
                 if forced_engine:
                     engine_to_use = forced_engine
                 else:
-                    requires_pytorch = any(m in model_name.lower() for m in pytorch_only_models)
-                    if requires_pytorch:
+                    try:
+                        requires_pytorch = any(m in model_name.lower() for m in pytorch_only_models)
+                        if requires_pytorch:
                         try:
                             import torch
                             print(f"\n\033[93m[Warning]\033[0m Model '{model_name}' requires the PyTorch Support Engine.")
@@ -635,6 +636,9 @@ def main():
                             else:
                                 print("\033[91mAborted.\033[0m We recommend using 'Qwen2.5-VL' or 'LLaVA' for native lightweight llama.cpp support.")
                                 sys.exit(0)
+                    except KeyboardInterrupt:
+                        print("\n\033[91mAborted by user.\033[0m")
+                        sys.exit(0)
                         
                 try:
                     from rich.console import Console
@@ -675,8 +679,10 @@ def main():
                         out_path = tempfile.mktemp(suffix=".png")
                         if os.environ.get("WAYLAND_DISPLAY"):
                             try:
-                                subprocess.run(["gnome-screenshot", "-f", out_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                subprocess.run(["gnome-screenshot", "-f", out_path], timeout=3, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                                 return out_path
+                            except subprocess.TimeoutExpired:
+                                raise Exception("Wayland security blocked the background screenshot (Timeout). Please log out and switch to 'GNOME on Xorg'.")
                             except Exception: pass
                             try:
                                 subprocess.run(["grim", out_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -740,6 +746,13 @@ def main():
                             sys.stdout.flush()
                         print()
                         sys.exit(0)
+                        
+                    import sys
+                    try:
+                        import termios
+                        termios.tcflush(sys.stdin, termios.TCIOFLUSH)
+                    except Exception:
+                        pass
                         
                     while True:
                         user_input = input(f"[{model_name}]> ")
