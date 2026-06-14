@@ -112,6 +112,11 @@ class HfVisionRuntime(RuntimeContract):
         else:
             inputs = processor(text=prompt, return_tensors="pt")
             
+        # Cast floating point tensors to match model dtype (e.g. float16)
+        for k, v in inputs.items():
+            if torch.is_tensor(v) and v.is_floating_point():
+                inputs[k] = v.to(model.dtype)
+                
         inputs = inputs.to(model.device)
         
         if stream:
@@ -119,7 +124,15 @@ class HfVisionRuntime(RuntimeContract):
             streamer = TextIteratorStreamer(processor.tokenizer, skip_prompt=True, skip_special_tokens=True)
             generation_kwargs = dict(inputs, streamer=streamer, max_new_tokens=500)
             
-            thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
+            def generate_and_catch_errors(**kwargs):
+                try:
+                    model.generate(**kwargs)
+                except Exception as e:
+                    print(f"\n[hf_vision error] model.generate failed: {e}")
+                finally:
+                    streamer.end()
+            
+            thread = threading.Thread(target=generate_and_catch_errors, kwargs=generation_kwargs)
             thread.start()
             
             def stream_response():

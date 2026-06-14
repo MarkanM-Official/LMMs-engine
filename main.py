@@ -594,12 +594,17 @@ Launcher Commands:
                                 import tempfile
                                 
                                 console.print("[dim magenta]📸 Capturing screen...[/dim magenta]")
-                                with mss.mss() as sct:
+                                with mss.MSS() as sct:
                                     monitor = sct.monitors[0]
                                     sct_img = sct.grab(monitor)
                                     import mss.tools
+                                    from PIL import Image
                                     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
                                         mss.tools.to_png(sct_img.rgb, sct_img.size, level=9, output=tf.name)
+                                        # Resize image to max 1024x1024 to save context tokens
+                                        with Image.open(tf.name) as img:
+                                            img.thumbnail((1024, 1024))
+                                            img.save(tf.name)
                                         with open(tf.name, "rb") as image_file:
                                             b64_data = base64.b64encode(image_file.read()).decode("utf-8")
                                         os.unlink(tf.name)
@@ -644,14 +649,19 @@ Launcher Commands:
                                 import tempfile
                                 
                                 console.print("[dim magenta]📸 Capturing screen...[/dim magenta]")
-                                with mss.mss() as sct:
+                                with mss.MSS() as sct:
                                     monitor = sct.monitors[0]
                                     sct_img = sct.grab(monitor)
                                     
                                     # Convert to base64 PNG
                                     import mss.tools
+                                    from PIL import Image
                                     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
                                         mss.tools.to_png(sct_img.rgb, sct_img.size, level=9, output=tf.name)
+                                        # Resize image to max 1024x1024 to save context tokens
+                                        with Image.open(tf.name) as img:
+                                            img.thumbnail((1024, 1024))
+                                            img.save(tf.name)
                                         with open(tf.name, "rb") as image_file:
                                             b64_data = base64.b64encode(image_file.read()).decode("utf-8")
                                         os.unlink(tf.name)
