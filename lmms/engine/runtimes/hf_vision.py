@@ -20,7 +20,7 @@ class HfVisionRuntime(RuntimeContract):
     def load_model(self, model_id: str) -> bool:
         # Import inside to avoid slow startup for non-vision users
         try:
-            from transformers import AutoProcessor, AutoModelForVision2Seq
+            from transformers import AutoProcessor, AutoModelForImageTextToText
             from transformers import BitsAndBytesConfig
         except ImportError:
             print("ERROR: transformers or bitsandbytes not installed.")
@@ -37,7 +37,7 @@ class HfVisionRuntime(RuntimeContract):
             )
             
             processor = AutoProcessor.from_pretrained(model_id)
-            model = AutoModelForVision2Seq.from_pretrained(
+            model = AutoModelForImageTextToText.from_pretrained(
                 model_id,
                 device_map="auto",
                 quantization_config=quantization_config
@@ -53,7 +53,23 @@ class HfVisionRuntime(RuntimeContract):
             print(f"ERROR: Failed to load PyTorch Vision Model: {e}")
             return False
 
-    def generate(self, payload: Dict[str, Any], stream: bool = False, auth: str = ""):
+    def unload_model(self) -> bool:
+        if "active" in self._models:
+            del self._models["active"]
+        self._models.clear()
+        # Optionally free CUDA memory
+        try:
+            import torch
+            torch.cuda.empty_cache()
+        except:
+            pass
+        return True
+
+    def chat(self, model: str, messages: list, stream: bool = False, options: dict = None, **kwargs) -> Any:
+        context = {'messages': messages, 'model_name': model}
+        return self.generate(context, stream)
+
+    def generate(self, context: Any, stream: bool = False) -> Any:
         if "active" not in self._models:
             if stream:
                 def err():
@@ -64,7 +80,7 @@ class HfVisionRuntime(RuntimeContract):
         processor = self._models["active"]["processor"]
         model = self._models["active"]["model"]
         
-        messages = payload.get("messages", [])
+        messages = context.get("messages", [])
         images = []
         processed_messages = []
         
@@ -121,3 +137,11 @@ class HfVisionRuntime(RuntimeContract):
 
     def tokenize(self, text: str) -> list[int]:
         return []
+
+    def health(self) -> Dict[str, Any]:
+        return {
+            "status": "ok" if self._models else "not_loaded",
+            "backend": "transformers (pytorch)",
+            "models_loaded": len([k for k in self._models.keys() if k != "active"]),
+            "model_paths": [k for k in self._models.keys() if k != "active"]
+        }
