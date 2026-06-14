@@ -662,6 +662,28 @@ def main():
                     else:
                         pass
                     
+                    def take_screenshot():
+                        import tempfile, subprocess, os
+                        out_path = tempfile.mktemp(suffix=".png")
+                        if os.environ.get("WAYLAND_DISPLAY"):
+                            try:
+                                subprocess.run(["gnome-screenshot", "-f", out_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                return out_path
+                            except Exception: pass
+                            try:
+                                subprocess.run(["grim", out_path], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                return out_path
+                            except Exception:
+                                raise Exception("Wayland detected but capture tools missing. Please run: sudo apt install gnome-screenshot")
+                        else:
+                            import mss, mss.tools
+                            with mss.MSS() as sct:
+                                monitor = sct.monitors[0]
+                                sct_img = sct.grab(monitor)
+                                mss.tools.to_png(sct_img.rgb, sct_img.size, level=9, output=out_path)
+                                return out_path
+
+                    
                     messages = []
                     # If prompt provided as arg, run it and exit
                     if prompt_parts:
@@ -677,20 +699,14 @@ def main():
                                 import tempfile
                                 
                                 console.print("[dim magenta]📸 Capturing screen...[/dim magenta]")
-                                with mss.MSS() as sct:
-                                    monitor = sct.monitors[0]
-                                    sct_img = sct.grab(monitor)
-                                    import mss.tools
-                                    from PIL import Image
-                                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
-                                        mss.tools.to_png(sct_img.rgb, sct_img.size, level=9, output=tf.name)
-                                        # Resize image to max 1024x1024 to save context tokens
-                                        with Image.open(tf.name) as img:
-                                            img.thumbnail((1024, 1024))
-                                            img.save(tf.name)
-                                        with open(tf.name, "rb") as image_file:
-                                            b64_data = base64.b64encode(image_file.read()).decode("utf-8")
-                                        os.unlink(tf.name)
+                                tf_name = take_screenshot()
+                                from PIL import Image
+                                with Image.open(tf_name) as img:
+                                    img.thumbnail((1024, 1024))
+                                    img.save(tf_name)
+                                with open(tf_name, "rb") as image_file:
+                                    b64_data = base64.b64encode(image_file.read()).decode("utf-8")
+                                os.unlink(tf_name)
                                 messages.append({
                                     "role": "user",
                                     "content": [
@@ -732,22 +748,14 @@ def main():
                                 import tempfile
                                 
                                 console.print("[dim magenta]📸 Capturing screen...[/dim magenta]")
-                                with mss.MSS() as sct:
-                                    monitor = sct.monitors[0]
-                                    sct_img = sct.grab(monitor)
-                                    
-                                    # Convert to base64 PNG
-                                    import mss.tools
-                                    from PIL import Image
-                                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tf:
-                                        mss.tools.to_png(sct_img.rgb, sct_img.size, level=9, output=tf.name)
-                                        # Resize image to max 1024x1024 to save context tokens
-                                        with Image.open(tf.name) as img:
-                                            img.thumbnail((1024, 1024))
-                                            img.save(tf.name)
-                                        with open(tf.name, "rb") as image_file:
-                                            b64_data = base64.b64encode(image_file.read()).decode("utf-8")
-                                        os.unlink(tf.name)
+                                tf_name = take_screenshot()
+                                from PIL import Image
+                                with Image.open(tf_name) as img:
+                                    img.thumbnail((1024, 1024))
+                                    img.save(tf_name)
+                                with open(tf_name, "rb") as image_file:
+                                    b64_data = base64.b64encode(image_file.read()).decode("utf-8")
+                                os.unlink(tf_name)
                                         
                                 messages.append({
                                     "role": "user",
