@@ -45,7 +45,7 @@ Usage: python main.py [command] [options]
 
 Engine Commands:
   pull <model>      Download a model
-  run <model>       Run a model interactively (-fast, -deep, -code, -research)
+  run <model>       Run a model interactively [-use l|p] (-fast, -deep, -code, -research)
   stop <model>      Unload model from VRAM
   ps                Show loaded models and engine stats
   list              List downloaded models
@@ -161,9 +161,9 @@ Launcher Commands:
   lmms -g / -c / -e              # Fast aliases
   lmms                           # Open default mode
 
-3. Core Engine (Ollama-style)
+3. Core Engine (Dual Engine Architecture)
   lmms pull <model>              # Auto-detect best quant & download
-  lmms run <model>               # Load and chat in CLI
+  lmms run <model> [-use l|p]    # Load & chat (-use l: llama.cpp, -use p: pytorch)
   lmms stop <model>              # Unload model
   lmms ps                        # Show active loaded models
   lmms list                      # List local downloaded models
