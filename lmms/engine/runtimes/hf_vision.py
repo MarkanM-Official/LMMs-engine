@@ -20,8 +20,17 @@ class HfVisionRuntime(RuntimeContract):
     def load_model(self, model_id: str) -> bool:
         # Import inside to avoid slow startup for non-vision users
         try:
+            os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+            os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+            os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+            import warnings
+            warnings.filterwarnings("ignore", category=UserWarning)
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            
             from transformers import AutoProcessor, AutoModelForImageTextToText
             from transformers import BitsAndBytesConfig
+            import logging
+            logging.getLogger("transformers").setLevel(logging.ERROR)
         except ImportError:
             print("ERROR: transformers or bitsandbytes not installed.")
             return False
