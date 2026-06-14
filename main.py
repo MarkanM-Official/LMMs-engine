@@ -620,22 +620,22 @@ def main():
                     try:
                         requires_pytorch = any(m in model_name.lower() for m in pytorch_only_models)
                         if requires_pytorch:
-                        try:
-                            import torch
-                            print(f"\n\033[93m[Warning]\033[0m Model '{model_name}' requires the PyTorch Support Engine.")
-                            print("Auto-switching to PyTorch engine since it is already installed...")
-                            engine_to_use = "pytorch"
-                        except ImportError:
-                            print(f"\n\033[93m[Warning]\033[0m The model '{model_name}' requires the heavy PyTorch Support Engine.")
-                            print("This package can run experimental models but uses massive resources (CUDA/PyTorch).")
-                            choice = input("Would you like to DOWNLOAD the Support Engine package? (y/n): ")
-                            if choice.strip().lower() == "y":
-                                print("\033[92mTo install the support package, please run:\033[0m")
-                                print("pip install torch torchvision transformers accelerate")
-                                sys.exit(0)
-                            else:
-                                print("\033[91mAborted.\033[0m We recommend using 'Qwen2.5-VL' or 'LLaVA' for native lightweight llama.cpp support.")
-                                sys.exit(0)
+                            try:
+                                import torch
+                                print(f"\n\033[93m[Warning]\033[0m Model '{model_name}' requires the PyTorch Support Engine.")
+                                print("Auto-switching to PyTorch engine since it is already installed...")
+                                engine_to_use = "pytorch"
+                            except ImportError:
+                                print(f"\n\033[93m[Warning]\033[0m The model '{model_name}' requires the heavy PyTorch Support Engine.")
+                                print("This package can run experimental models but uses massive resources (CUDA/PyTorch).")
+                                choice = input("Would you like to DOWNLOAD the Support Engine package? (y/n): ")
+                                if choice.strip().lower() == "y":
+                                    print("\033[92mTo install the support package, please run:\033[0m")
+                                    print("pip install torch torchvision transformers accelerate")
+                                    sys.exit(0)
+                                else:
+                                    print("\033[91mAborted.\033[0m We recommend using 'Qwen2.5-VL' or 'LLaVA' for native lightweight llama.cpp support.")
+                                    sys.exit(0)
                     except KeyboardInterrupt:
                         print("\n\033[91mAborted by user.\033[0m")
                         sys.exit(0)
